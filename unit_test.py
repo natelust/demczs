@@ -31,7 +31,7 @@ dep_n = dep + noise
 #here are some guesses for the parameter function as well as bounds on them
 #and guess on step sizes for each parameter and an extra empty array since
 #none of our functions require extra arguments
-par_g  = [1.8,np.pi/2.7,5.2]
+par_g  = [1.8,np.pi/2.7,15.2]
 bounds = [[6.5,7.5],[0.5,1.5],[14,16]]
 steps  = [0.01,0.01,0.01]
 extra  = []
@@ -59,14 +59,14 @@ print("Time elapsed:"+str(t2-t1)+"s\n")
 print("True parameters "+str(par_k[0])+","+str(par_k[1])+","+\
       str(par_k[2])+"\n")
 print("Estimated Parameters +"+str(np.median(output[3][-500:,0]))+","+\
-      str(np.median(output[3][-500:,1]))+","+str(np.median(output[3][-500:,0]))+"\n")
+      str(np.median(output[3][-500:,1]))+","+str(np.median(output[3][-500:,2]))+"\n")
 print("Estimated uncertanties +"+str(np.std(output[3][-500:,0]))+","+\
-      str(np.std(output[3][-500:,1]))+","+str(np.std(output[3][-500:,0]))+"\n\n")
+      str(np.std(output[3][-500:,1]))+","+str(np.std(output[3][-500:,2]))+"\n\n")
 print("Results of multiple chain per process\n")
 print("Time elapsed:"+str(t4-t3)+"s\n")
 print("True parameters "+str(par_k[0])+","+str(par_k[1])+","+\
       str(par_k[2])+"\n")
 print("Estimated Parameters +"+str(np.median(output2[3][-500:,0]))+","+\
-      str(np.median(output2[3][-500:,1]))+","+str(np.median(output2[3][-500:,0]))+"\n")
+      str(np.median(output2[3][-500:,1]))+","+str(np.median(output2[3][-500:,2]))+"\n")
 print("Estimated uncertanties +"+str(np.std(output2[3][-500:,0]))+","+\
-      str(np.std(output2[3][-500:,1]))+","+str(np.std(output2[3][-500:,0]))+"\n")
+      str(np.std(output2[3][-500:,1]))+","+str(np.std(output2[3][-500:,2]))+"\n")
