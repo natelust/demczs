@@ -3,89 +3,94 @@ import numpy.random as npr
 import multiprocessing as mp
 import time as tm
 import ctypes
-import sys, os
-import imp
 import random
-from itertools import product
 
-class my_process(mp.Process):
-    def __init__(self,itterations,thinning,data,ind,errors,function,\
-                 chi_func,con_func,const,ex,smstp,queuet,z_array,shape,\
-                 M,num_chain,num_split,pre_hist,chi_array):
+
+class MyProcess(mp.Process):
+    def __init__(self, itterations, thinning, data, ind, errors, function,
+                 chi_func, con_func, const, ex, smstp, queuet, z_array, shape,
+                 M, num_chain, num_split, pre_hist, chi_array, sentinal):
         mp.Process.__init__(self)
-        #global z_array
-        self.its      = itterations
+        self.its = itterations
         self.thinning = thinning
-        self.data     = data
-        self.ind      = ind
-        self.errors   = errors
-	self.ex       =	ex
+        self.data = data
+        self.ind = ind
+        self.errors = errors
+        self.ex = ex
         self.function = function
         self.chi_func = chi_func
         self.con_func = con_func
-        self.const    = const
-        self.ex       = ex
-        self.smstp    = smstp
-        self.queuet   = queuet
-        self.lock     = M.get_lock()
-        self.M        = M
-        self.nc       = num_chain
-        self.num_sp   = num_split
+        self.const = const
+        self.ex = ex
+        self.smstp = smstp
+        self.queuet = queuet
+        self.lock = M.get_lock()
+        self.M = M
+        self.nc = num_chain
+        self.num_sp = num_split
         self.pre_hist = pre_hist
-        self.z_array  = z_array
-        self.shape    = shape
-        self.z_view   = np.ctypeslib.as_array(z_array.get_obj())
-        self.zview    = self.z_view.reshape(shape)
-        self.chi_arr  = np.ctypeslib.as_array(chi_array.get_obj())
-        self.zlocs    = []
+        self.z_array = z_array
+        self.shape = shape
+        self.z_view = np.ctypeslib.as_array(z_array.get_obj())
+        self.zview = self.z_view.reshape(shape)
+        self.chi_arr = np.ctypeslib.as_array(chi_array.get_obj())
+        self.zlocs = []
+        self.sentinal = sentinal
         for i in range(self.num_sp):
             self.zlocs.append([])
-        
+
     def run(self):
-	#These tasks must be done at the beginning of the run function
-        #as it is not until the run function starts that the program
-        #actually forks, thus if we need tasks to happen in a new process
-        #they must be done here
-        #The numpy random system must have its seen relinitialized in the
-        #new process or each of the sub processes will inherit the same
-        #seed, and produce the same 'random' steps. Such is the downfall
-        #of random numbers in computers. The random.randomint function is
-        #process and thread safe and will produce different random numbers
-        #in each thread.
-	self.myname = mp.current_process().name.split("-")[-1]
-	np.random.seed(random.randint(0,100000))
-        self.z_view   = np.ctypeslib.as_array(self.z_array.get_obj())
-        self.zview    = self.z_view.reshape(self.shape)
+        # These tasks must be done at the beginning of the run function
+        # as it is not until the run function starts that the program
+        # actually forks, thus if we need tasks to happen in a new process
+        # they must be done here
+        # The numpy random system must have its seen relinitialized in the
+        # new process or each of the sub processes will inherit the same
+        # seed, and produce the same 'random' steps. Such is the downfall
+        # of random numbers in computers. The random.randomint function is
+        # process and thread safe and will produce different random numbers
+        # in each thread.
+        self.myname = mp.current_process().name.split("-")[-1]
+        np.random.seed(random.randint(0, 100000))
+        self.z_view = np.ctypeslib.as_array(self.z_array.get_obj())
+        self.zview = self.z_view.reshape(self.shape)
 
-        self.par_p    = []
-        self.chi_p    = []
+        self.par_p = []
+        self.chi_p = []
 
-        for i in xrange(self.num_sp):
-            randomint      = np.random.randint(self.M.value)
-            self.par_p.append(np.copy(self.zview[randomint]))
-            model          = self.function(self.par_p[i],self.ind,self.ex)
-            self.chi_p.append(self.chi_func(model,self.data,self.errors,self.ex))
-            self.chi_p[i] += self.con_func(self.par_p[i],self.const)
-        self.par_c    = np.copy(self.par_p)
-        self.chi_c    = np.copy(self.chi_p)
-        self.chi_b    = np.copy(self.chi_p)
-        self.par_b    = np.copy(self.par_p)
-        self.gamma    = 2.38/np.sqrt(2*len(self.par_p[0]))
-        self.accept   = [0]*self.num_sp
-        self.gen      = 0
-        stop_con      = self.its/self.thinning
+        for i in range(self.num_sp):
+            # Check that selected points do not create nans in the model, as
+            # some model function may have zeros
+            parametersBad = True
+            while parametersBad:
+                randomint = np.random.randint(self.M.value)
+                temp_p = np.copy(self.zview[randomint])
+                model = self.function(temp_p, self.ind, self.ex)
+                # check that the parameters dont create nans
+                if np.sum(np.isnan(model)) == 0:
+                    parametersBad = False
+            self.par_p.append(temp_p)
+            self.chi_p.append(self.chi_func(model, self.data, self.errors, self.ex))
+            self.chi_p[i] += self.con_func(self.par_p[i], self.const)
+        self.par_c = np.copy(self.par_p)
+        self.chi_c = np.copy(self.chi_p)
+        self.chi_b = np.copy(self.chi_p)
+        self.par_b = np.copy(self.par_p)
+        self.gamma = 2.38/np.sqrt(2*len(self.par_p[0]))
+        self.accept = [0]*self.num_sp
+        self.gen = 0
+        stop_con = self.its/self.thinning
         npru = np.random.uniform
-        jrange = xrange(self.num_sp)
-        irange = xrange(self.thinning)
+        jrange = range(self.num_sp)
+        irange = range(self.thinning)
         con_func = self.con_func
         function = self.function
         chi_func = self.chi_func
-        snooker  = self.snooker
-        gamma    = self.gamma
-        nc       = self.nc
-        getvec   = self.getvec
+        snooker = self.snooker
+        gamma = self.gamma
+        nc = self.nc
+        getvec = self.getvec
         while self.gen < stop_con:
-            start_time= tm.time()
             for j in jrange:
                 for i in irange:
                     if npru() < 0.1:
@@ -96,84 +101,81 @@ class my_process(mp.Process):
                         else:
                             bamma = gamma*1/(nc*2)
                         self.par_c[j] = self.par_p[j] + getvec(bamma)
-		    con_check = con_func(self.par_c[j],self.const)
-		    if con_check == 0:
-			try:
-                    		model = function(self.par_c[j],self.ind,self.ex)
-		    		self.chi_c[j]  = chi_func(model,self.data,
-                                               self.errors,self.ex)
-                                del model
-			except:
-				print("model failed failed",self.par_c[j])
-				self.chi_c[j] = 9e99
-		    else:
-			self.chi_c[j]  = con_check
-                    #self.chi_c[j] += self.con_func(self.par_c[j],self.const)
+                    con_check = con_func(self.par_c[j], self.const)
+                    if con_check == self.sentinal:
+                        self.chi_c[j] = 9e99
+                    else:
+                        model = function(self.par_c[j], self.ind, self.ex)
+                        self.chi_c[j] = chi_func(model, self.data, self.errors,
+                                                 self.ex) + con_check
+                        del model
+                    if self.chi_c[j] >= self.sentinal:
+                        continue
                     alpha = np.exp(-0.5*(self.chi_c[j] - self.chi_p[j]))
                     if not np.isfinite(alpha):
                         alpha = 0.0
-                    if alpha >=1 or alpha > npru():
+                    if alpha >= 1 or alpha > npru():
                         self.accept[j] += 1
                         self.chi_p[j] = self.chi_c[j]
                         self.par_p[j][:] = self.par_c[j][:]
-                        if self.chi_c[j]  < self.chi_b[j]:
+                        if self.chi_c[j] < self.chi_b[j]:
                             self.chi_b[j] = self.chi_c[j]
                             self.par_b[j][:] = self.par_c[j][:]
                     del alpha
             self.update()
         self.cleanup()
         return
-        
-    def cleanup(self):
-        self.queuet.send([self.par_b,self.chi_b,self.accept,self.zlocs])
 
-            
+    def cleanup(self):
+        self.queuet.send([self.par_b, self.chi_b, self.accept, self.zlocs])
+
     def update(self):
         with self.lock:
-            for l in xrange(self.num_sp):
-                self.zview[self.M.value][:]    = self.par_p[l][:]
-                self.chi_arr[self.M.value-self.pre_hist]  = self.chi_p[l] 
+            for l in range(self.num_sp):
+                self.zview[self.M.value][:] = self.par_p[l][:]
+                self.chi_arr[self.M.value-self.pre_hist] = self.chi_p[l]
                 self.zlocs[l].append(self.M.value)
                 self.M.value += 1
         self.gen += 1
-                    
-    def snooker(self,j):
-        randint = np.random.randint(self.M.value-self.nc)
-        ints    = self.getrandints(0,self.M.value)
-        #ints    = np.random.permutation(self.M.value)
-	direc   = self.par_p[j] - self.zview[randint]
-	while np.sum(direc) == 0.0:
-		randint = np.random.randint(self.M.value-self.nc)
-		direc = self.par_p[j] - self.zview[randint]
-        zp1     = np.dot(self.zview[ints[0]],direc)/\
-                  np.dot(direc,direc)*\
-                  direc
-        zp2     = np.dot(self.zview[ints[1]],direc)/\
-                  np.dot(direc,direc)*\
-                  direc
-        return np.random.uniform(1.2,2.2)*(zp1-zp2)
 
-    def getrandints(self,low,high):
-        ints = np.random.randint(low,high,2)
+    def snooker(self, j):
+        randint = np.random.randint(self.M.value-self.nc)
+        ints = self.getrandints(0, self.M.value)
+        # ints    = np.random.permutation(self.M.value)
+        direc = self.par_p[j] - self.zview[randint]
+        while np.sum(direc) == 0.0:
+            randint = np.random.randint(self.M.value-self.nc)
+            direc = self.par_p[j] - self.zview[randint]
+        zp1 = np.dot(self.zview[ints[0]], direc) /\
+            np.dot(direc, direc) *\
+            direc
+        zp2 = np.dot(self.zview[ints[1]], direc) /\
+            np.dot(direc, direc) *\
+            direc
+        return np.random.uniform(1.2, 2.2)*(zp1-zp2)
+
+    def getrandints(self, low, high):
+        ints = np.random.randint(low, high, 2)
         while ints[1] is ints[0]:
-            ints[1] = np.random.randint(low,high)
+            ints[1] = np.random.randint(low, high)
         return ints
 
-    def getvec(self,gamma):
-        #ints = np.random.permutation(np.arange(0,self.M.value))
-        ints = self.getrandints(0,self.M.value)
-        retval = gamma*(self.zview[ints[0]][:] - self.zview[ints[1]][:]) 
+    def getvec(self, gamma):
+        # ints = np.random.permutation(np.arange(0,self.M.value))
+        ints = self.getrandints(0, self.M.value)
+        retval = gamma*(self.zview[ints[0]][:] - self.zview[ints[1]][:])
         error = np.zeros((self.smstp.shape))
-        for i in xrange(len(self.smstp)):
-          if (self.smstp[i] == 0):
-            error[i] = 0
-          else:
-            error[i] = np.random.normal(0,self.smstp[i])
+        for i in range(len(self.smstp)):
+            if (self.smstp[i] == 0):
+                error[i] = 0
+            else:
+                error[i] = np.random.normal(0, self.smstp[i])
         return retval + error
 
 
-def demczs(iterations,data,ind,errors,function,chi_func,con_func,
-         par,steps,const,ex,num_chain,thinning,num_processes=False,hist_mult=10):
+def demczs(iterations, data, ind, errors, function, chi_func, con_func,
+           par, steps, const, ex, num_chain, thinning, num_processes=False,
+           hist_mult=10, sentinal=1e99):
     '''
     This is a more advanced function than the standard mcmc fitting routine.
     It should be fairly generic to use for multiple functions, just specify
@@ -239,6 +241,8 @@ def demczs(iterations,data,ind,errors,function,chi_func,con_func,
                              size no. of parameters times hist_mult, and will consist
                              of parameters drawn from uniform distributions on the
                              intervals defined in const
+    sentinal    - (float)    A python object which will be returned from the bounds
+                             check function to indicate that the step should be outright rejected
 
     Returns:
     par_b       - (array)    the best fit parameters for the function
@@ -311,70 +315,75 @@ def demczs(iterations,data,ind,errors,function,chi_func,con_func,
     now just be mindful.At this time, I only know of this bug on windows, but similar
     caviats apply about multiprocessing on other platforms.
     '''
-    time_start = tm.time()
-    #global z_array
-    if num_processes == False:
+    # global z_array
+    if num_processes is False:
         num_processes = num_chain
     if num_chain < num_processes:
         num_processes = num_chain
     if num_chain > num_processes:
         split = []
-        div   = int(np.floor(num_chain/num_processes))
-        if np.mod(num_chain,num_processes):
+        div = int(np.floor(num_chain/num_processes))
+        if np.mod(num_chain, num_processes):
             split += [div]*(num_processes-1)
             split += [div+1]
         else:
             split += [div]*num_processes
     steps = np.array(steps)
     if num_chain == num_processes:
-        split = np.ones(num_chain,dtype=int)
+        split = np.ones(num_chain, dtype=int)
     iterations = np.floor(iterations/thinning)*thinning
-    z_array = mp.Array(ctypes.c_double,np.zeros((len(par)*hist_mult+\
-                    num_chain*iterations/thinning)*\
-                       len(par)))
+    iterations_int = int(iterations)
+    z_array = mp.Array(ctypes.c_double, np.zeros((len(par)*hist_mult +
+                       num_chain*int(iterations_int/thinning)) * len(par)))
     chi_arr = \
-    mp.Array(ctypes.c_double,np.zeros(num_chain*iterations/thinning))
+        mp.Array(ctypes.c_double, np.zeros(int(num_chain*iterations/thinning)))
 
-    #z_view  = np.frombuffer(z_array,dtype='float64')
-    z_view  = np.ctypeslib.as_array(z_array.get_obj())
-    zview   = z_view.reshape((len(par)*hist_mult+num_chain*iterations/thinning,\
+    # z_view  = np.frombuffer(z_array,dtype='float64')
+    z_view = np.ctypeslib.as_array(z_array.get_obj())
+    zview = z_view.reshape((len(par)*hist_mult+num_chain*int(iterations/thinning),\
                               len(par)))
-    #chi_arr = np.zeros(num_chain*iterations/thinning)
-    #populate the initial zarray
-    M = mp.Value('i',hist_mult*len(par))
+    # chi_arr = np.zeros(num_chain*iterations/thinning)
+    # populate the initial zarray
+    M = mp.Value('i', hist_mult*len(par))
     for i in range(hist_mult*len(par)):
-        for j in range(len(par)):
-            zview[i][j] = npr.uniform(const[j][0],const[j][1])
-    #make the queues
-    qtree_there  = [mp.Pipe() for x in range(num_processes)]
-    pipe_end = {"master":1,"worker":0}
+        badSample = True
+        while badSample:
+            sample = []
+            for j in range(len(par)):
+                sample.append(npr.uniform(const[j][0], const[j][1]))
+            if con_func(sample, const) != sentinal:
+                badSample = False
+            zview[i] = sample
+    # make the queues
+    qtree_there = [mp.Pipe() for x in range(num_processes)]
+    pipe_end = {"master": 1, "worker": 0}
     myproc = []
     for i in range(num_processes):
-        myproc.append(my_process(iterations,\
-                                 thinning,\
-                                 data,\
-                                 ind,\
-                                 errors,\
-                                 function,\
-                                 chi_func,\
-                                 con_func,\
-                                 const,\
-                                 ex,\
-                                 steps/10.,\
-                                 qtree_there[i][pipe_end["worker"]],\
-                                 z_array,\
-                                 zview.shape,\
-                                 M,\
-                                 num_chain,\
-                                 split[i],\
-                                 hist_mult*len(par),\
-                                 chi_arr))
+        myproc.append(MyProcess(iterations,
+                                thinning,
+                                data,
+                                ind,
+                                errors,
+                                function,
+                                chi_func,
+                                con_func,
+                                const,
+                                ex,
+                                steps/10.,
+                                qtree_there[i][pipe_end["worker"]],
+                                z_array,
+                                zview.shape,
+                                M,
+                                num_chain,
+                                split[i],
+                                hist_mult*len(par),
+                                chi_arr,
+                                sentinal))
         tm.sleep(0.1)
         myproc[-1].start()
-    gen_counter = 0
+    # gen_counter = 0
     target = 0.05
-    start_time = tm.time()
-    itovrthn = iterations/thinning
+    # itovrthn = iterations/thinning
     '''
     while gen_counter < itovrthn:
         if gen_counter/(itovrthn) >target:
@@ -388,7 +397,7 @@ def demczs(iterations,data,ind,errors,function,chi_func,con_func,
             for l in range(len(tmp_value[0])):
             #    print(M,np.sum(split[:n]),l)
                 zview[M+np.sum(split[:n])+l][:] = tmp_value[0][l][:]
-                chi_arr[M+np.sum(split[:n])+l-hist_mult*len(par)]  = tmp_value[1][l] 
+                chi_arr[M+np.sum(split[:n])+l-hist_mult*len(par)]  = tmp_value[1][l]
         M += num_chain
         for n in range(num_processes):
             qtree_back[n][pipe_end["master"]].send(M)
@@ -396,16 +405,15 @@ def demczs(iterations,data,ind,errors,function,chi_func,con_func,
     '''
     stop_condition = len(par)*hist_mult+num_chain*iterations/thinning
     while M.value < stop_condition:
-        #sleep here until all the processes are done with their work
+        # sleep here until all the processes are done with their work
         if M.value/float(stop_condition) > target:
-            print('{} % complete'.format(target*100))
+            print('{:.2f} % complete'.format(target*100))
             target += 0.05
-        tm.sleep(0.1)
-    #now we must get the results
-    best_list   = []
-    chi_list    = []
+    # now we must get the results
+    best_list = []
+    chi_list = []
     accept_list = []
-    chain_locs  = []
+    chain_locs = []
     for n in range(num_processes):
         tmp_value = qtree_there[n][pipe_end["master"]].recv()
         for l in range(len(tmp_value[0])):
@@ -416,12 +424,10 @@ def demczs(iterations,data,ind,errors,function,chi_func,con_func,
         p = myproc[n]
         p.join()
     min_pos = np.argmin(chi_list)
-    return best_list[min_pos],chi_list[min_pos],\
-      np.sum(accept_list)/(num_chain*iterations),np.copy(zview),np.copy(chi_arr),chain_locs
+    return best_list[min_pos], chi_list[min_pos],\
+        np.sum(accept_list)/(num_chain*iterations), np.copy(zview), np.copy(chi_arr), chain_locs
 
 
-
-
-if __name__ == '__main__':            
-    output_test =  demczs(1e3,dep,ind,depe,pole_model,pole_chi,pole_prior,\
-                  par,step,con,ex,3,25)
+# if __name__ == '__main__':
+#    output_test = demczs(1e3, dep, ind, depe, pole_model, pole_chi, pole_prior,\
+#                  par, step, con, ex, 3, 25)
